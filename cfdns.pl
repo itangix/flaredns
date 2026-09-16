@@ -32,7 +32,7 @@ my $dry_run = 0;
 my $help    = 0;
 
 my $zone_name;
-my ($list, $add, $edit, $delete);
+my ($list, $add, $edit, $delete, $list_zones);
 my $suffix;
 my $regex;
 my $type;
@@ -45,6 +45,7 @@ GetOptions(
     'help|h'       => \$help,
     'zone|z=s'     => \$zone_name,
     'list|L'       => \$list,
+    'list-zones'   => \$list_zones,
     'add|A'        => \$add,
     'edit|E'       => \$edit,
     'delete|D'     => \$delete,
@@ -59,8 +60,9 @@ GetOptions(
 my $usage = <<"USAGE";
 用法: $0 [选项] 内容...
 
-动作（四选一，不给出则显示本帮助）:
+动作（五选一，不给出则显示本帮助）:
   -L, --list            列出匹配的记录
+      --list-zones      列出账号下所有区域（无需 --zone）
   -A, --add             为每个内容各新增一条记录
                         （名称由 -p 前缀 + zone 生成，类型默认 A）
   -E, --edit            改写匹配记录的 content（类型不变）
@@ -69,7 +71,7 @@ my $usage = <<"USAGE";
   -D, --delete          删除匹配记录；给出内容时仅删除 content 在其中者
 
 选项:
-  -z, --zone NAME     要操作的 Zone 域名（必填）
+  -z, --zone NAME     要操作的 Zone 域名（--list-zones 时无需）
   -t, --type TYPE     只处理该类型的记录（如 A、CNAME，大小写不敏感）
   -p, --prefix STR    名称前缀；也用于 --add 生成记录名称（自动补 zone）
   -s, --suffix STR    名称后缀（大小写不敏感），末尾不含 zone 时自动补全
@@ -87,6 +89,9 @@ my $usage = <<"USAGE";
 示例:
   export CF_API_TOKEN="xxx"
 
+  # 列出账号下所有区域
+  $0 --list-zones
+
   # 列出 .web.example.com 下所有记录
   $0 -z example.com -L -s .web
 
@@ -102,11 +107,12 @@ USAGE
 
 if ($help) { print $usage; exit 0; }
 
-my $n_actions = grep { $_ } $list, $add, $edit, $delete;
+my $n_actions = grep { $_ } $list, $list_zones, $add, $edit, $delete;
 if (!$n_actions) { print $usage; exit 0; }
-die "动作只能选一个（-L / -A / -E / -D）\n" if $n_actions > 1;
+die "动作只能选一个（-L / --list-zones / -A / -E / -D）\n" if $n_actions > 1;
 
-my $action = $list ? 'list' : $add ? 'add' : $edit ? 'edit' : 'delete';
+my $action = $list ? 'list' : $list_zones ? 'list-zones'
+    : $add ? 'add' : $edit ? 'edit' : 'delete';
 
 my @contents = @ARGV;
 
@@ -118,7 +124,7 @@ my $show_comment  = defined $comment_opt;
 my $write_comment = defined $comment_opt && length $comment_opt;
 
 die "缺少必填参数 --zone（用 --help 查看用法）\n"
-    unless defined $zone_name && length $zone_name;
+    unless $action eq 'list-zones' || (defined $zone_name && length $zone_name);
 die "-p / -s / -r 只能选一个（用 --help 查看用法）\n"
     if (grep { defined && length } $prefix, $suffix, $regex) > 1;
 die "匹配规则不能为空\n"
@@ -133,7 +139,7 @@ die "--add 需要 -p|--prefix 来生成记录名称\n"
     if $action eq 'add' && !(defined $prefix && length $prefix);
 
 # --suffix 末尾不是 zone 时自动补全
-if (defined $suffix && $suffix !~ /\Q$zone_name\E$/i) {
+if (defined $zone_name && defined $suffix && $suffix !~ /\Q$zone_name\E$/i) {
     $suffix .= '.' unless $suffix =~ /\.$/;
     $suffix .= $zone_name;
 }
@@ -190,6 +196,27 @@ sub api_request {
         die "API $method $path 失败: $errors\n";
     }
     return $data->{result};
+}
+
+# 列出所有区域
+if ($action eq 'list-zones') {
+    my @zones;
+    my $page = 1;
+    while (1) {
+        my $res = api_request('GET', "/zones?per_page=50&page=$page");
+        push @zones, @$res;
+        last if @$res < 50;
+        $page++;
+    }
+    print "共 " . scalar(@zones) . " 个区域\n";
+    print "$SEP\n";
+    for my $z (@zones) {
+        printf "%s%s%s  %s%s%s%s\n",
+            $C_NAME, $z->{name}, $C_OFF,
+            $C_TYPE, $z->{status}, $C_OFF,
+            $z->{paused} ? "  paused" : "";
+    }
+    exit 0;
 }
 
 # 获取 Zone ID
