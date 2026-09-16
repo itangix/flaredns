@@ -1,5 +1,7 @@
 # flaredns.pl
 
+[English](README.en.md)
+
 Cloudflare DNS 记录批量管理脚本：列出区域 / 列出、新增、修改、删除 DNS 记录。
 
 单文件 Perl 脚本，通过 Cloudflare API v4 操作，依赖 `curl`。
