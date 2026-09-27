@@ -125,13 +125,18 @@ if (defined $zone_name && defined $suffix && $suffix !~ /\Q$zone_name\E\.?$/i) {
     $suffix .= $zone_name;
 }
 
-# --add 的名称 = 前缀 + zone
+# --add 的名称 = 前缀 + zone；保留用户输入，末尾缺 . 才补
 my $add_name;
+my $add_api;
 my $add_type = defined $type ? uc $type : 'A';
 if ($action eq 'add') {
     $add_name = $prefix;
+    if ($add_name !~ /\Q$zone_name\E\.?$/i) {
+        $add_name .= '.' unless $add_name =~ /\.$/;
+        $add_name .= $zone_name;
+    }
     $add_name .= '.' unless $add_name =~ /\.$/;
-    $add_name .= $zone_name unless $add_name =~ /\Q$zone_name\E\.?$/i;
+    ($add_api = $add_name) =~ s/\.$//;
 }
 
 my $api_token = $ENV{CF_API_TOKEN}
@@ -205,7 +210,7 @@ my $zones = api_request('GET', "/zones?name=$zone_name");
 die "未找到域名 $zone_name\n" unless @$zones;
 my $zone_id = $zones->[0]{id};
 
-print "Zone: $zone_name\n";
+print "Zone: $zone_name" . ($zone_name =~ /\.$/ ? "" : ".") . "\n";
 print "$SEP\n";
 
 # 拉取全部现有记录
@@ -222,19 +227,19 @@ while (1) {
 if ($action eq 'add') {
     for my $c (@contents) {
         my ($dup) = grep {
-            lc($_->{name}) eq lc($add_name)
+            lc($_->{name}) eq lc($add_api)
                 && lc($_->{type}) eq lc($add_type)
                 && lc($_->{content}) eq lc($c)
         } @all;
         if ($dup) {
-            print "已存在: $C_NAME$add_name$C_OFF. $C_TTL Auto$C_OFF $C_TYPE$add_type$C_OFF $C_CONTENT$c$C_OFF，跳过。\n";
+            print "已存在: $C_NAME$add_name$C_OFF $C_TTL Auto$C_OFF $C_TYPE$add_type$C_OFF $C_CONTENT$c$C_OFF，跳过。\n";
             next;
         }
-        print "ADD    $C_NAME$add_name$C_OFF. $C_TTL Auto$C_OFF $C_TYPE$add_type$C_OFF $C_CONTENT$c$C_OFF\n";
+        print "ADD    $C_NAME$add_name$C_OFF $C_TTL Auto$C_OFF $C_TYPE$add_type$C_OFF $C_CONTENT$c$C_OFF\n";
         if (!$dry_run) {
             my %body = (
                 type    => $add_type,
-                name    => $add_name,
+                name    => $add_api,
                 content => $c,
                 ttl     => 1,
                 proxied => JSON::PP::false(),
@@ -274,7 +279,7 @@ if (!@web) {
 # 列出
 if ($action eq 'list') {
     for my $rec (@web) {
-        printf "%s%s%s. %s%s%s %s%s%s %s%s%s%s%s\n",
+        printf "%s%s.%s %s%s%s %s%s%s %s%s%s%s%s\n",
             $C_NAME, $rec->{name}, $C_OFF,
             $C_TTL, ttl_str($rec->{ttl}), $C_OFF,
             $C_TYPE, $rec->{type}, $C_OFF,
@@ -309,7 +314,7 @@ if ($action eq 'edit') {
             $ok++;
             next;
         }
-        printf "UPDATE %s%s%s.  %s%s%s %s%s%s %s%s%s → %s%s%s%s%s\n",
+        printf "UPDATE %s%s.%s  %s%s%s %s%s%s %s%s%s → %s%s%s%s%s\n",
             $C_NAME, $rec->{name}, $C_OFF,
             $C_TTL, ttl_str($rec->{ttl}), $C_OFF,
             $C_TYPE, $rec->{type}, $C_OFF,
@@ -351,7 +356,7 @@ my @del = @contents
 
 my ($ok, $fail) = (0, 0);
 for my $rec (@del) {
-    printf "DELETE %s%s%s.  %s%s%s %s%s%s %s%s%s%s%s\n",
+    printf "DELETE %s%s.%s  %s%s%s %s%s%s %s%s%s%s%s\n",
         $C_NAME, $rec->{name}, $C_OFF,
         $C_TTL, ttl_str($rec->{ttl}), $C_OFF,
         $C_TYPE, $rec->{type}, $C_OFF,
