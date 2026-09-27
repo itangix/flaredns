@@ -55,27 +55,26 @@ GetOptions(
     'regex|r=s'    => \$regex,
     'comment:s'    => \$comment_opt,
     'tags=s'       => \$tags_str,
-) or die "用法: $0 [选项] 内容...（--help 查看帮助）\n";
+) or die "用法: $0 [选项] 内容...\n";
 
 my $usage = <<"USAGE";
 用法: $0 [选项] 内容...
 
-动作（五选一，不给出则显示本帮助）:
+动作:
   -L, --list            列出匹配的记录
-      --list-zones      列出账号下所有区域（无需 --zone）
+      --list-zones      列出账号下所有区域
   -A, --add             为每个内容各新增一条记录
-                        （名称由 -p 前缀 + zone 生成，类型默认 A）
-  -E, --edit            改写匹配记录的 content（类型不变）
+  -E, --edit            改写匹配记录的 content
                         内容只有一个时全部设为它，否则与匹配记录一一对应
                         省略内容时配合 --tags/--comment 可只写标签/注释
   -D, --delete          删除匹配记录；给出内容时仅删除 content 在其中者
 
 选项:
-  -z, --zone NAME     要操作的 Zone 域名（--list-zones 时无需）
-  -t, --type TYPE     只处理该类型的记录（如 A、CNAME，大小写不敏感）
-  -p, --prefix STR    名称前缀；也用于 --add 生成记录名称（自动补 zone）
-  -s, --suffix STR    名称后缀（大小写不敏感），末尾不含 zone 时自动补全
-  -r, --regex RE      名称正则（大小写不敏感）
+  -z, --zone NAME     要操作的 Zone 域名
+  -t, --type TYPE     只处理该类型的记录
+  -p, --prefix STR    名称前缀；也用于 --add 生成记录名称
+  -s, --suffix STR    名称后缀，末尾不含 zone 时自动补全
+  -r, --regex RE      名称正则
                       -p / -s / -r 三选一；都不给则匹配全部
   -n, --dry-run       只预览，不实际调用写接口
       --comment [文本] 列出时显示注释；--add / --edit 时写入该文本
@@ -85,31 +84,13 @@ my $usage = <<"USAGE";
 环境变量:
   CF_API_TOKEN     必填。Cloudflare API Token
                    需要权限: Zone:Zone:Read + Zone:DNS:Edit
-
-示例:
-  export CF_API_TOKEN="xxx"
-
-  # 列出账号下所有区域
-  $0 --list-zones
-
-  # 列出 .web.example.com 下所有记录
-  $0 -z example.com -L -s .web
-
-  # 新增 api.example.com A 1.1.1.1
-  $0 -z example.com -A -p api -t A 1.1.1.1
-
-  # 把 web 前缀记录的 content 改为 1.1.1.1
-  $0 -z example.com -E -p web 1.1.1.1
-
-  # 删除 web 前缀且 content 为 1.1.1.1 的记录
-  $0 -z example.com -D -p web 1.1.1.1
 USAGE
 
 if ($help) { print $usage; exit 0; }
 
 my $n_actions = grep { $_ } $list, $list_zones, $add, $edit, $delete;
 if (!$n_actions) { print $usage; exit 0; }
-die "动作只能选一个（-L / --list-zones / -A / -E / -D）\n" if $n_actions > 1;
+die "动作只能选一个 -L / --list-zones / -A / -E / -D\n" if $n_actions > 1;
 
 my $action = $list ? 'list' : $list_zones ? 'list-zones'
     : $add ? 'add' : $edit ? 'edit' : 'delete';
@@ -119,13 +100,13 @@ my @contents = @ARGV;
 # --tags 逗号分隔
 my @tags = defined $tags_str ? grep { length } split /\s*,\s*/, $tags_str : ();
 
-# --comment：列出时显示；add/edit 时写入（有文本才写）
+# --comment：列出时显示；add/edit 时写入
 my $show_comment  = defined $comment_opt;
 my $write_comment = defined $comment_opt && length $comment_opt;
 
-die "缺少必填参数 --zone（用 --help 查看用法）\n"
+die "缺少必填参数 --zone\n"
     unless $action eq 'list-zones' || (defined $zone_name && length $zone_name);
-die "-p / -s / -r 只能选一个（用 --help 查看用法）\n"
+die "-p / -s / -r 只能选一个\n"
     if (grep { defined && length } $prefix, $suffix, $regex) > 1;
 die "匹配规则不能为空\n"
     if grep { defined && !length } $suffix, $regex, $prefix, $type;
@@ -154,7 +135,7 @@ if ($action eq 'add') {
 }
 
 my $api_token = $ENV{CF_API_TOKEN}
-    or die "请设置环境变量 CF_API_TOKEN（用 --help 查看用法）\n";
+    or die "请设置环境变量 CF_API_TOKEN\n";
 
 my $api_base = 'https://api.cloudflare.com/client/v4';
 
@@ -221,7 +202,7 @@ if ($action eq 'list-zones') {
 
 # 获取 Zone ID
 my $zones = api_request('GET', "/zones?name=$zone_name");
-die "未找到域名 $zone_name（检查 Token 权限）\n" unless @$zones;
+die "未找到域名 $zone_name\n" unless @$zones;
 my $zone_id = $zones->[0]{id};
 
 print "Zone: $zone_name\n";
@@ -263,7 +244,6 @@ if ($action eq 'add') {
             api_request('POST', "/zones/$zone_id/dns_records", \%body);
         }
     }
-    print "（dry-run 模式，未实际写入 Cloudflare）\n" if $dry_run;
     exit 0;
 }
 
@@ -360,7 +340,6 @@ if ($action eq 'edit') {
     }
     print "$SEP\n";
     printf "OK=%d  UPDATE=%d  FAILED=%d\n", $ok, $upd, $fail;
-    print "（dry-run 模式，未实际写入 Cloudflare）\n" if $dry_run;
     exit 0;
 }
 
@@ -390,4 +369,3 @@ for my $rec (@del) {
 }
 print "$SEP\n";
 printf "DELETED=%d  FAILED=%d\n", $ok, $fail;
-print "（dry-run 模式，未实际写入 Cloudflare）\n" if $dry_run;
