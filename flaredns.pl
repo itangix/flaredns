@@ -139,7 +139,7 @@ die "--add 需要 -p|--prefix 来生成记录名称\n"
     if $action eq 'add' && !(defined $prefix && length $prefix);
 
 # --suffix 末尾不是 zone 时自动补全
-if (defined $zone_name && defined $suffix && $suffix !~ /\Q$zone_name\E$/i) {
+if (defined $zone_name && defined $suffix && $suffix !~ /\Q$zone_name\E\.?$/i) {
     $suffix .= '.' unless $suffix =~ /\.$/;
     $suffix .= $zone_name;
 }
@@ -150,7 +150,7 @@ my $add_type = defined $type ? uc $type : 'A';
 if ($action eq 'add') {
     $add_name = $prefix;
     $add_name .= '.' unless $add_name =~ /\.$/;
-    $add_name .= $zone_name unless $add_name =~ /\Q$zone_name\E$/i;
+    $add_name .= $zone_name unless $add_name =~ /\Q$zone_name\E\.?$/i;
 }
 
 my $api_token = $ENV{CF_API_TOKEN}
