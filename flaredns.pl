@@ -40,6 +40,7 @@ my %FIELDS = (
     SMIMEA => [qw(usage selector matching_type certificate)],
     SSHFP => [qw(algorithm type fingerprint)],
     DS => [qw(key_tag algorithm digest_type digest)],
+    DNSKEY => [qw(flags protocol algorithm public_key)],
 );
 
 # 必须为数字的字段（按类型区分，如 NAPTR 的 flags 是字符串）
