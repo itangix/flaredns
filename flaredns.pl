@@ -383,8 +383,17 @@ if ($action eq 'edit') {
 
 # 删除
 my %want = map { lc($_) => 1 } @contents;
+my %want_srv;
+for my $c (@contents) {
+    my $d = eval { srv_data($c) };
+    $want_srv{lc(srv_sig($d))} = 1 if $d;
+}
 my @del = @contents
-    ? grep { $want{lc($_->{content})} } @web
+    ? grep {
+        uc($_->{type}) eq 'SRV'
+            ? $want_srv{lc(srv_sig($_->{data}))} || $want{lc($_->{content})}
+            : $want{lc($_->{content})}
+      } @web
     : @web;
 
 my ($ok, $fail) = (0, 0);
