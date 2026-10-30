@@ -32,6 +32,7 @@ sub ttl_str {
 my %FIELDS = (
     SRV => [qw(priority weight port target)],
     MX  => [qw(priority target)],
+    URI => [qw(priority weight target)],
 );
 
 # 必须为数字的字段（按类型区分，如 NAPTR 的 flags 是字符串）
