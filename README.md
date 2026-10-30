@@ -73,16 +73,52 @@ flaredns.pl -z example.com -E -p web 1.1.1.1
 flaredns.pl -z example.com -D -p web 1.1.1.1
 ```
 
-## SRV 记录
+## 单字段记录
 
-SRV 的 content 写成 `priority weight port target`，脚本会转成 Cloudflare 需要的 `data`：
+这些类型的 content 直接写单个值：
+
+| 类型 | content |
+| --- | --- |
+| A | IPv4 地址 |
+| AAAA | IPv6 地址 |
+| CNAME | 目标域名 |
+| TXT | 文本 |
+| NS | 名称服务器 |
+| PTR | 目标域名 |
+| SPF | 策略文本（已弃用，建议用 TXT） |
+
+## 多字段记录
+
+下列类型的 content 按空格分隔，脚本会转成 Cloudflare 需要的 `data`（MX 用 `priority` + `content`）：
+
+| 类型 | content 格式 |
+| --- | --- |
+| MX | `priority target` |
+| SRV | `priority weight port target` |
+| URI | `priority weight target` |
+| SVCB / HTTPS | `priority target value` |
+| CAA | `flags tag value` |
+| TLSA / SMIMEA | `usage selector matching_type certificate` |
+| SSHFP | `algorithm type fingerprint` |
+| DS | `key_tag algorithm digest_type digest` |
+| DNSKEY | `flags protocol algorithm public_key` |
+| CERT | `type key_tag algorithm certificate` |
+| NAPTR | `order preference flags service regexp replacement` |
+
+示例：
 
 ```sh
+# SRV
 flaredns.pl -z example.com -A -p _sip._tcp -t SRV "10 5 5060 sip.example.com"
-# 名称: _sip._tcp.example.com.
+
+# MX（根记录）
+flaredns.pl -z example.com -A -p example.com -t MX "10 mail.example.com"
+
+# CAA（根记录）
+flaredns.pl -z example.com -A -p example.com -t CAA '0 issue "letsencrypt.org"'
 ```
 
-`--edit` 和 `--delete` 同样支持 SRV；删除按 `priority/weight/port/target` 匹配。
+`--list` / `--edit` / `--delete` 同样支持这些类型；删除按解析后的字段匹配。
 
 列表中的记录名以 FQDN 显示，末尾带 `.`。
 

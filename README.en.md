@@ -73,16 +73,52 @@ flaredns.pl -z example.com -E -p web 1.1.1.1
 flaredns.pl -z example.com -D -p web 1.1.1.1
 ```
 
-## SRV records
+## Single-field records
 
-Write SRV content as `priority weight port target`; the script converts it to the `data` object Cloudflare expects:
+For these types, `content` is a single value:
+
+| Type | `content` |
+| --- | --- |
+| A | IPv4 address |
+| AAAA | IPv6 address |
+| CNAME | target hostname |
+| TXT | text |
+| NS | nameserver |
+| PTR | target hostname |
+| SPF | policy text (deprecated; use TXT) |
+
+## Multi-field records
+
+For the types below, write `content` as space-separated fields; the script converts it to the `data` object Cloudflare expects (MX uses `priority` + `content`):
+
+| Type | `content` format |
+| --- | --- |
+| MX | `priority target` |
+| SRV | `priority weight port target` |
+| URI | `priority weight target` |
+| SVCB / HTTPS | `priority target value` |
+| CAA | `flags tag value` |
+| TLSA / SMIMEA | `usage selector matching_type certificate` |
+| SSHFP | `algorithm type fingerprint` |
+| DS | `key_tag algorithm digest_type digest` |
+| DNSKEY | `flags protocol algorithm public_key` |
+| CERT | `type key_tag algorithm certificate` |
+| NAPTR | `order preference flags service regexp replacement` |
+
+Examples:
 
 ```sh
+# SRV
 flaredns.pl -z example.com -A -p _sip._tcp -t SRV "10 5 5060 sip.example.com"
-# name: _sip._tcp.example.com.
+
+# MX (apex)
+flaredns.pl -z example.com -A -p example.com -t MX "10 mail.example.com"
+
+# CAA (apex)
+flaredns.pl -z example.com -A -p example.com -t CAA '0 issue "letsencrypt.org"'
 ```
 
-`--edit` and `--delete` also support SRV; deletes match on `priority/weight/port/target`.
+`--list` / `--edit` / `--delete` also support these types; deletes match on the parsed fields.
 
 Record names are shown as FQDN with a trailing `.`.
 
