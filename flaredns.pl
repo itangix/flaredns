@@ -28,6 +28,28 @@ sub ttl_str {
     return "${d}d" . ($hh ? "${hh}h" : "");
 }
 
+# SRV 内容 "priority weight port target" -> Cloudflare data
+sub srv_data {
+    my $c = shift;
+    my ($priority, $weight, $port, $target) = split /\s+/, $c, 4;
+    die "SRV 内容格式应为 'priority weight port target': $c\n"
+        unless defined $target
+            && $priority =~ /^\d+$/ && $weight =~ /^\d+$/ && $port =~ /^\d+$/
+            && length $target;
+    return {
+        priority => 0 + $priority,
+        weight   => 0 + $weight,
+        port     => 0 + $port,
+        target   => $target,
+    };
+}
+
+sub srv_sig {
+    my $d = shift;
+    return '' unless $d;
+    return join ' ', map { $d->{$_} // '' } qw(priority weight port target);
+}
+
 my $dry_run = 0;
 my $help    = 0;
 
@@ -226,10 +248,14 @@ while (1) {
 # 新增
 if ($action eq 'add') {
     for my $c (@contents) {
+        my $is_srv = $add_type eq 'SRV';
+        my $data   = $is_srv ? srv_data($c) : undef;
         my ($dup) = grep {
             lc($_->{name}) eq lc($add_api)
                 && lc($_->{type}) eq lc($add_type)
-                && lc($_->{content}) eq lc($c)
+                && ($is_srv
+                    ? lc(srv_sig($_->{data})) eq lc(srv_sig($data))
+                    : lc($_->{content}) eq lc($c))
         } @all;
         if ($dup) {
             print "已存在: $C_NAME$add_name$C_OFF $C_TTL Auto$C_OFF $C_TYPE$add_type$C_OFF $C_CONTENT$c$C_OFF，跳过。\n";
@@ -240,10 +266,10 @@ if ($action eq 'add') {
             my %body = (
                 type    => $add_type,
                 name    => $add_api,
-                content => $c,
                 ttl     => 1,
                 proxied => JSON::PP::false(),
             );
+            if ($is_srv) { $body{data} = $data } else { $body{content} = $c }
             $body{tags} = \@tags if defined $tags_str;
             $body{comment} = $comment_opt if $write_comment;
             api_request('POST', "/zones/$zone_id/dns_records", \%body);
@@ -308,8 +334,15 @@ if ($action eq 'edit') {
     for my $i (0 .. $#web) {
         my $rec     = $web[$i];
         my $content = $targets[$i];
+        my $is_srv  = uc($rec->{type}) eq 'SRV';
+        my $data    = $is_srv
+            ? (@contents ? srv_data($content) : $rec->{data})
+            : undef;
+        my $same = $is_srv
+            ? lc(srv_sig($rec->{data})) eq lc(srv_sig($data))
+            : lc($rec->{content}) eq lc($content);
 
-        if (lc($rec->{content}) eq lc($content) && !defined $tags_str && !$write_comment) {
+        if ($same && !defined $tags_str && !$write_comment) {
             print "OK     $C_NAME$rec->{name}$C_OFF\n";
             $ok++;
             next;
@@ -330,10 +363,10 @@ if ($action eq 'edit') {
                 my %body = (
                     type    => $rec->{type},
                     name    => $rec->{name},
-                    content => $content,
                     ttl     => 1,
                     proxied => $rec->{proxied},
                 );
+                if ($is_srv) { $body{data} = $data } else { $body{content} = $content }
                 $body{tags} = \@tags if defined $tags_str;
                 $body{comment} = $comment_opt if $write_comment;
                 api_request('PUT', "/zones/$zone_id/dns_records/$rec->{id}", \%body);
