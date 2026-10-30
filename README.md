@@ -73,6 +73,19 @@ flaredns.pl -z example.com -E -p web 1.1.1.1
 flaredns.pl -z example.com -D -p web 1.1.1.1
 ```
 
+## SRV 记录
+
+SRV 的 content 写成 `priority weight port target`，脚本会转成 Cloudflare 需要的 `data`：
+
+```sh
+flaredns.pl -z example.com -A -p _sip._tcp -t SRV "10 5 5060 sip.example.com"
+# 名称: _sip._tcp.example.com.
+```
+
+`--edit` 和 `--delete` 同样支持 SRV；删除按 `priority/weight/port/target` 匹配。
+
+列表中的记录名以 FQDN 显示，末尾带 `.`。
+
 ## 许可证
 
 [MIT](LICENSE)

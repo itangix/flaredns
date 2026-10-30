@@ -73,6 +73,19 @@ flaredns.pl -z example.com -E -p web 1.1.1.1
 flaredns.pl -z example.com -D -p web 1.1.1.1
 ```
 
+## SRV records
+
+Write SRV content as `priority weight port target`; the script converts it to the `data` object Cloudflare expects:
+
+```sh
+flaredns.pl -z example.com -A -p _sip._tcp -t SRV "10 5 5060 sip.example.com"
+# name: _sip._tcp.example.com.
+```
+
+`--edit` and `--delete` also support SRV; deletes match on `priority/weight/port/target`.
+
+Record names are shown as FQDN with a trailing `.`.
+
 ## License
 
 [MIT](LICENSE)
