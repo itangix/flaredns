@@ -38,6 +38,7 @@ my %FIELDS = (
     CAA => [qw(flags tag value)],
     TLSA => [qw(usage selector matching_type certificate)],
     SMIMEA => [qw(usage selector matching_type certificate)],
+    SSHFP => [qw(algorithm type fingerprint)],
 );
 
 # 必须为数字的字段（按类型区分，如 NAPTR 的 flags 是字符串）
