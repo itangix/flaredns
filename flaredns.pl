@@ -35,6 +35,7 @@ my %FIELDS = (
     URI => [qw(priority weight target)],
     SVCB => [qw(priority target value)],
     HTTPS => [qw(priority target value)],
+    CAA => [qw(flags tag value)],
 );
 
 # 必须为数字的字段（按类型区分，如 NAPTR 的 flags 是字符串）
