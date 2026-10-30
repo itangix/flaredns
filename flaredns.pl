@@ -28,26 +28,82 @@ sub ttl_str {
     return "${d}d" . ($hh ? "${hh}h" : "");
 }
 
-# SRV 内容 "priority weight port target" -> Cloudflare data
-sub srv_data {
-    my $c = shift;
-    my ($priority, $weight, $port, $target) = split /\s+/, $c, 4;
-    die "SRV 内容格式应为 'priority weight port target': $c\n"
-        unless defined $target
-            && $priority =~ /^\d+$/ && $weight =~ /^\d+$/ && $port =~ /^\d+$/
-            && length $target;
-    return {
-        priority => 0 + $priority,
-        weight   => 0 + $weight,
-        port     => 0 + $port,
-        target   => $target,
-    };
+# 多字段类型：content 按字段顺序解析；MX 用 priority + content，其余用 data
+my %FIELDS = (
+    SRV => [qw(priority weight port target)],
+    MX  => [qw(priority target)],
+);
+
+# 必须为数字的字段（按类型区分，如 NAPTR 的 flags 是字符串）
+my %NUM_FIELD = map { $_ => 1 } qw(
+    SRV:priority SRV:weight SRV:port
+    MX:priority
+    URI:priority URI:weight
+    SVCB:priority HTTPS:priority
+    CAA:flags
+    TLSA:usage TLSA:selector TLSA:matching_type
+    SMIMEA:usage SMIMEA:selector SMIMEA:matching_type
+    SSHFP:algorithm SSHFP:type
+    DS:key_tag DS:algorithm DS:digest_type
+    DNSKEY:flags DNSKEY:protocol DNSKEY:algorithm
+    CERT:type CERT:key_tag CERT:algorithm
+    NAPTR:order NAPTR:preference
+);
+
+# 允许省略末尾字段的类型
+my %OPTIONAL_LAST = map { $_ => 1 } qw(SVCB HTTPS);
+
+# content -> API 字段；单值类型返回 { content => ... }
+sub parse_content {
+    my ($type, $content) = @_;
+    my $fields = $FIELDS{$type} or return { content => $content };
+    my @v = split /\s+/, $content, scalar @$fields;
+    push @v, '' while @v < @$fields && $OPTIONAL_LAST{$type};
+    die "$type 内容格式应为 '" . join(' ', @$fields) . "': $content\n"
+        if @v < @$fields;
+    my %f;
+    @f{@$fields} = @v;
+    for my $k (@$fields) {
+        next unless $NUM_FIELD{"$type:$k"};
+        die "$type 的 $k 必须是数字: $f{$k}\n" unless $f{$k} =~ /^\d+$/;
+        $f{$k} = 0 + $f{$k};
+    }
+    if ($type eq 'CAA' || $type eq 'NAPTR') {
+        $f{$_} =~ s/^"(.*)"$/$1/ for @$fields;
+    }
+    return { priority => $f{priority}, content => $f{target} } if $type eq 'MX';
+    return { data => \%f };
 }
 
-sub srv_sig {
-    my $d = shift;
-    return '' unless $d;
-    return join ' ', map { $d->{$_} // '' } qw(priority weight port target);
+# 记录 -> 展示用 content
+sub content_of {
+    my $rec    = shift;
+    my $type   = uc $rec->{type};
+    my $fields = $FIELDS{$type} or return $rec->{content};
+    return join ' ', ($rec->{priority} // ''), ($rec->{content} // '')
+        if $type eq 'MX';
+    return $rec->{content} unless $rec->{data};
+    return join ' ', map { $rec->{data}{$_} // '' } @$fields;
+}
+
+# 规范化签名，用于查重与删除匹配
+sub sig_of {
+    my ($type, $content) = @_;
+    my $s = lc $content;
+    $s =~ s/"([^"]*)"/$1/g if $type eq 'CAA' || $type eq 'NAPTR';
+    $s =~ s/^\s+|\s+$//g;
+    $s =~ s/\s+/ /g;
+    return $s;
+}
+
+# 已有记录 -> PUT 需要的字段（--edit 未改内容时）
+sub existing_content {
+    my $rec  = shift;
+    my $type = uc $rec->{type};
+    return { content => $rec->{content} } unless $FIELDS{$type};
+    return { priority => $rec->{priority}, content => $rec->{content} }
+        if $type eq 'MX';
+    return { data => $rec->{data} };
 }
 
 my $dry_run = 0;
@@ -248,14 +304,11 @@ while (1) {
 # 新增
 if ($action eq 'add') {
     for my $c (@contents) {
-        my $is_srv = $add_type eq 'SRV';
-        my $data   = $is_srv ? srv_data($c) : undef;
+        my $fields = parse_content($add_type, $c);
         my ($dup) = grep {
             lc($_->{name}) eq lc($add_api)
                 && lc($_->{type}) eq lc($add_type)
-                && ($is_srv
-                    ? lc(srv_sig($_->{data})) eq lc(srv_sig($data))
-                    : lc($_->{content}) eq lc($c))
+                && sig_of($add_type, content_of($_)) eq sig_of($add_type, $c)
         } @all;
         if ($dup) {
             print "已存在: $C_NAME$add_name$C_OFF $C_TTL Auto$C_OFF $C_TYPE$add_type$C_OFF $C_CONTENT$c$C_OFF，跳过。\n";
@@ -268,8 +321,8 @@ if ($action eq 'add') {
                 name    => $add_api,
                 ttl     => 1,
                 proxied => JSON::PP::false(),
+                %$fields,
             );
-            if ($is_srv) { $body{data} = $data } else { $body{content} = $c }
             $body{tags} = \@tags if defined $tags_str;
             $body{comment} = $comment_opt if $write_comment;
             api_request('POST', "/zones/$zone_id/dns_records", \%body);
@@ -309,7 +362,7 @@ if ($action eq 'list') {
             $C_NAME, $rec->{name}, $C_OFF,
             $C_TTL, ttl_str($rec->{ttl}), $C_OFF,
             $C_TYPE, $rec->{type}, $C_OFF,
-            $C_CONTENT, $rec->{content}, $C_OFF,
+            $C_CONTENT, content_of($rec), $C_OFF,
             $rec->{proxied} ? " Proxy" : " DNS",
             $show_comment && defined $rec->{comment} && length $rec->{comment}
                 ? "  # $rec->{comment}" : "";
@@ -334,13 +387,14 @@ if ($action eq 'edit') {
     for my $i (0 .. $#web) {
         my $rec     = $web[$i];
         my $content = $targets[$i];
-        my $is_srv  = uc($rec->{type}) eq 'SRV';
-        my $data    = $is_srv
-            ? (@contents ? srv_data($content) : $rec->{data})
-            : undef;
-        my $same = $is_srv
-            ? lc(srv_sig($rec->{data})) eq lc(srv_sig($data))
-            : lc($rec->{content}) eq lc($content);
+        my $old     = content_of($rec);
+        my $new     = @contents ? $content : $old;
+        my $extra   = @contents
+            ? parse_content(uc($rec->{type}), $content)
+            : existing_content($rec);
+        my $same = @contents
+            ? sig_of(uc($rec->{type}), $old) eq sig_of(uc($rec->{type}), $content)
+            : 1;
 
         if ($same && !defined $tags_str && !$write_comment) {
             print "OK     $C_NAME$rec->{name}$C_OFF\n";
@@ -351,8 +405,8 @@ if ($action eq 'edit') {
             $C_NAME, $rec->{name}, $C_OFF,
             $C_TTL, ttl_str($rec->{ttl}), $C_OFF,
             $C_TYPE, $rec->{type}, $C_OFF,
-            $C_CONTENT, $rec->{content}, $C_OFF,
-            $C_CONTENT, $content, $C_OFF,
+            $C_CONTENT, $old, $C_OFF,
+            $C_CONTENT, $new, $C_OFF,
             $rec->{proxied} ? " Proxy" : " DNS",
             $show_comment && defined $rec->{comment} && length $rec->{comment}
                 ? "  # $rec->{comment}" : "";
@@ -365,8 +419,8 @@ if ($action eq 'edit') {
                     name    => $rec->{name},
                     ttl     => 1,
                     proxied => $rec->{proxied},
+                    %$extra,
                 );
-                if ($is_srv) { $body{data} = $data } else { $body{content} = $content }
                 $body{tags} = \@tags if defined $tags_str;
                 $body{comment} = $comment_opt if $write_comment;
                 api_request('PUT', "/zones/$zone_id/dns_records/$rec->{id}", \%body);
@@ -382,17 +436,12 @@ if ($action eq 'edit') {
 }
 
 # 删除
-my %want = map { lc($_) => 1 } @contents;
-my %want_srv;
-for my $c (@contents) {
-    my $d = eval { srv_data($c) };
-    $want_srv{lc(srv_sig($d))} = 1 if $d;
-}
 my @del = @contents
     ? grep {
-        uc($_->{type}) eq 'SRV'
-            ? $want_srv{lc(srv_sig($_->{data}))} || $want{lc($_->{content})}
-            : $want{lc($_->{content})}
+        my $rec  = $_;
+        my $rsig = sig_of(uc($rec->{type}), content_of($rec));
+        my $raw  = lc($rec->{content} // '');
+        grep { sig_of(uc($rec->{type}), $_) eq $rsig || lc($_) eq $raw } @contents
       } @web
     : @web;
 
@@ -402,7 +451,7 @@ for my $rec (@del) {
         $C_NAME, $rec->{name}, $C_OFF,
         $C_TTL, ttl_str($rec->{ttl}), $C_OFF,
         $C_TYPE, $rec->{type}, $C_OFF,
-        $C_CONTENT, $rec->{content}, $C_OFF,
+        $C_CONTENT, content_of($rec), $C_OFF,
         $rec->{proxied} ? " Proxy" : " DNS",
         $show_comment && defined $rec->{comment} && length $rec->{comment}
             ? "  # $rec->{comment}" : "";
